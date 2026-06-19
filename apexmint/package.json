@@ -1,0 +1,28 @@
+{
+  "name": "apexmint-pro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ApexMint Pro — non-custodial, multi-tenant, multi-chain NFT minting platform",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/test.mjs",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "hash-wasm": "^4.12.0"
+  }
+}

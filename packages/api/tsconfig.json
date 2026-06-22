@@ -1,0 +1,14 @@
+// packages/api/tsconfig.json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "paths": {
+      "@apex/core/*": ["../core/src/*"],
+      "@prisma/client": ["../../node_modules/@prisma/client"]
+    }
+  },
+  "include": ["src/**/*"],
+  "references": [{ "path": "../core" }]
+}

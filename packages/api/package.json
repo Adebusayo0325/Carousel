@@ -1,0 +1,27 @@
+{
+  "name": "@apex/api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/app.js"
+  },
+  "dependencies": {
+    "@apex/core": "*",
+    "@prisma/client": "^5.13.0",
+    "@fastify/cookie": "^9.3.0",
+    "@fastify/cors": "^9.0.0",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/rate-limit": "^9.1.0",
+    "argon2": "^0.40.3",
+    "bullmq": "^5.7.0",
+    "fastify": "^4.27.0",
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.10.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}

@@ -1,0 +1,74 @@
+# docker-compose.yml  — development (hot-reload, source mounts)
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: apexmint
+      POSTGRES_USER: apex
+      POSTGRES_PASSWORD: devpassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apex -d apexmint"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: deps   # dev: run tsx directly from source
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npx tsx watch packages/api/src/app.ts
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://apex:devpassword@postgres:5432/apexmint
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      target: deps
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npx tsx watch packages/worker/src/worker.ts
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://apex:devpassword@postgres:5432/apexmint
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:

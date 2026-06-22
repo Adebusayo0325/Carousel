@@ -1,0 +1,21 @@
+{
+  "name": "@apex/worker",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@apex/core": "*",
+    "@apex/api": "*",
+    "bullmq": "^5.7.0",
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.10.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}

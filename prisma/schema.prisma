@@ -1,0 +1,297 @@
+// apex-mint-pro prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Tier {
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum ScheduleStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum KeyStatus {
+  UNUSED
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCESS KEYS  (admin-generated, argon2-hashed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AccessKey {
+  id           String    @id @default(cuid())
+  keyHash      String    @unique   // argon2id hash of the raw key
+  keyPrefix    String              // first 8 chars (plaintext) for fast lookup
+  tier         Tier      @default(BASIC)
+  features     String[]  @default([])
+  status       KeyStatus @default(UNUSED)
+  label        String?             // admin-assigned human label
+  activatedAt  DateTime?
+  expiresAt    DateTime?           // set at activation = activatedAt + duration
+  revokedAt    DateTime?
+  revokedBy    String?
+  createdAt    DateTime  @default(now())
+  createdBy    String              // admin identifier
+  durationDays Int       @default(30)
+  metadata     Json      @default("{}")
+
+  user         User?
+  auditLogs    AuditLog[]
+
+  @@index([keyPrefix])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  label        String?                       // display name
+  tier         Tier      @default(BASIC)
+  accessKeyId  String    @unique
+  accessKey    AccessKey @relation(fields: [accessKeyId], references: [id])
+  sessionToken String?   @unique             // current session (rotated on each login)
+  sessionExpiresAt DateTime?
+  lastLoginAt  DateTime?
+  lastLoginIp  String?
+  preferences  Json      @default("{}")
+  totpSecret   String?                       // 2FA (optional, enforced for Enterprise)
+  totpEnabled  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  wallets      Wallet[]
+  schedules    Schedule[]
+  mintHistory  MintRecord[]
+  nftHoldings  NftHolding[]
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+
+  @@index([sessionToken])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WALLETS  (encrypted per-user vault)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Wallet {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chain           String   @default("evm")  // "evm" | "solana"
+  address         String
+  encryptedKey    String   // AES-256-GCM ciphertext (hex)
+  encKeyIv        String   // 12-byte IV (hex)
+  encKeyTag       String   // 16-byte auth tag (hex)
+  encKeyVersion   Int      @default(1)       // bump on key rotation
+  label           String?
+  chainIds        Int[]    @default([1])     // EVM chain IDs this wallet is used on
+  spendLimitEth   Float?                     // max ETH per mint run (null = unlimited)
+  isActive        Boolean  @default(true)
+  isBurner        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, address, chain])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEDULES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Schedule {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contractAddress String
+  chainId         Int
+  chain           String         @default("evm")
+  mintTime        DateTime?
+  waitForPhase    Boolean        @default(false)
+  phaseCheckIntervalMs Int       @default(5000)
+  phaseMaxWaitMs  Int            @default(3600000)
+  quantity        Int
+  mintPrice       Float
+  status          ScheduleStatus @default(PENDING)
+  config          Json                          // full mint config (sanitized, no private keys)
+  walletAddresses String[]                      // specific wallets for this schedule
+  jobId           String?                       // BullMQ job ID
+  results         Json?                         // set on completion
+  errorMsg        String?
+  retryCount      Int            @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  completedAt     DateTime?
+
+  @@index([userId, status])
+  @@index([jobId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MINT HISTORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MintRecord {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduleId      String?
+  walletAddress   String
+  contractAddress String
+  chainId         Int
+  chain           String   @default("evm")
+  txHash          String?
+  status          String   // success | failed | pending | skipped | price_warning
+  fnName          String?
+  gasUsed         String?
+  gasCostEth      Float?
+  mintPrice       Float
+  quantity        Int
+  errorMsg        String?
+  blockNumber     BigInt?
+  priceGuard      Json?
+  rugScore        Int?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([contractAddress, chainId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NFT HOLDINGS (portfolio)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model NftHolding {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress   String
+  contractAddress String
+  chainId         Int
+  chain           String   @default("evm")
+  tokenId         String
+  tokenStandard   String   @default("ERC721")
+  name            String?
+  description     String?
+  imageUrl        String?
+  collectionName  String?
+  collectionSlug  String?
+  floorPrice      Float?
+  listedPrice     Float?
+  listingId       String?
+  marketplace     String?   // opensea | blur | magiceden | tensor
+  isListed        Boolean  @default(false)
+  metadata        Json?
+  lastSynced      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, walletAddress, contractAddress, tokenId, chainId])
+  @@index([userId, walletAddress])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API KEYS (Enterprise tier — programmatic access)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyHash   String   @unique
+  prefix    String   // first 8 chars (displayed to user)
+  label     String?
+  scopes    String[] @default([])   // read | write | mint | schedule
+  isRevoked Boolean  @default(false)
+  lastUsed  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT LOGS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  accessKeyId String?
+  accessKey   AccessKey? @relation(fields: [accessKeyId], references: [id], onDelete: SetNull)
+  action      String   // AUTH_LOGIN | WALLET_ADD | MINT_EXECUTE | SCHEDULE_CREATE | KEY_REVOKE …
+  resource    String?
+  resourceId  String?
+  ipAddress   String?
+  userAgent   String?
+  success     Boolean  @default(true)
+  metadata    Json?    // sanitised — no keys/secrets
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTRACT CACHE  (ABI + metadata, shared across users)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ContractCache {
+  id              String   @id @default(cuid())
+  contractAddress String
+  chainId         Int
+  abi             Json?
+  name            String?
+  standard        String?  // ERC721 | ERC1155 | UNKNOWN
+  isProxy         Boolean  @default(false)
+  implementationAddress String?
+  isVerified      Boolean  @default(false)
+  rugScore        Int?
+  rugDetails      Json?
+  lastFetched     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractAddress, chainId])
+  @@index([contractAddress])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RPC HEALTH  (scored per endpoint)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RpcHealth {
+  id          String   @id @default(cuid())
+  chainId     Int
+  url         String
+  latencyMs   Float?
+  blockNumber BigInt?
+  errorRate   Float    @default(0)
+  score       Float    @default(100)
+  isActive    Boolean  @default(true)
+  lastChecked DateTime @default(now())
+
+  @@unique([chainId, url])
+}
